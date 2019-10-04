@@ -1,0 +1,152 @@
+---
+title: "classification_homework_jd2543"
+author: "James Davydov"
+date: "October 1, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = T)
+```
+
+```{r, include=FALSE}
+library(lattice)
+library(ggplot2)
+library(caret)
+library(ROCR)
+library(pROC)
+library(MASS)
+library(gridExtra)
+library(dplyr)
+library(ggfortify)
+library(glmnet)
+library(tidyverse)
+```
+
+Split data into training and test set
+```{r}
+set.seed(1127)
+train_size <- floor(0.75 * nrow(airquality))
+
+train_pos <- sample(seq_len(nrow(airquality)), size = train_size)
+train_regression <- airquality[train_pos,-c(1,2)]
+test_regression <- airquality[-train_pos,-c(1,2)]
+```
+
+## Ridge Regression
+
+Create and train model 
+```{r}
+set.seed(1127)
+ctrl =  trainControl(method = "boot", 15)
+
+Ridge_regression <- train(Temp ~ Wind + Month, data = train_regression,
+                          method = 'ridge', trControl= ctrl) 
+```
+
+```{r}
+Ridge_regression 
+```
+
+Examine the residuals 
+```{r}
+ridge_test_pred <- predict(Ridge_regression, newdata = test_regression)
+
+#plot the predicted values vs the observed values
+plot_ridge_test_pred <- data.frame(Temp_test_pred = ridge_test_pred, 
+                                   Observed_Temp = test_regression$Temp)
+ggplot(data = plot_ridge_test_pred) +
+  geom_point(aes(x=Observed_Temp, y = Temp_test_pred)) + 
+  ggtitle("True Temp Value vs Predicted Temp Value Ridge Regression") +
+  theme_bw()
+
+#median residual value should be close to zero
+median(resid(Ridge_regression))
+```
+
+# Homework
+
+## Lasso
+1. Create and train model using Lasso regularization
+```{r}
+set.seed(1127)
+ctrl =  trainControl(method = "boot", 15)
+
+lasso_regression <- train(Temp ~ Wind + Month, data = train_regression,
+                          method = 'lasso', trControl= ctrl) 
+lasso_predict <- predict(lasso_regression, newdata = test_regression, method = "lasso")
+lasso_predict #Predicted values after lasso regularization
+```
+
+2. Examine the residuals 
+```{r}
+#Plot the predicted values vs the observed values
+plot_lasso_test_pred <- data.frame(Temp_test_pred = lasso_predict, 
+                                   Observed_Temp = test_regression$Temp)
+ggplot(data = plot_lasso_test_pred) +
+  geom_point(aes(x=Observed_Temp, y = Temp_test_pred)) + 
+  ggtitle("True Temp Value vs Predicted Temp Value Lasso Regression") +
+  theme_bw()
+
+#Median residual value should be close to zero
+median(resid(lasso_regression))
+#The median residual is 1.3529, which is relatively close to zero, which is good.
+```
+
+
+# Homework
+
+1. Use the Breast Cancer dataset from the mlbench package, and predict whether the cancer is malignant or benign using one of the algorithms we learned about in class. Give some rationale as to why you chose this algorithm. Plot ROC curves, and confusion matrices. If you are choosing a hyperparameter like K or lambda, explain how and why you chose it. 
+
+```{r}
+library(mlbench)
+data("BreastCancer") #Loading in BreastCancer dataset
+BreastCancer <- na.omit(BreastCancer) #Omitting any rows with NA values in dataset
+BreastCancer <- BreastCancer[,-1] #Omitting ID column from dataset
+for(i in 1:9) { #For loop which converts dataset columns from factors to numeric
+ BreastCancer[, i] <- as.numeric(as.character(BreastCancer[, i]))
+}
+```
+
+```{r}
+set.seed(1127)
+
+n <- 0.75*nrow(BreastCancer) #Creating variable 'n' to ennumerate 75% of dataset rows
+trainsmp <- sample(nrow(BreastCancer), size = n, replace = FALSE) #Sampling random rows and saving as variable
+
+Breast_train <- BreastCancer[trainsmp,][,1:10] #Creating training subset of data
+Breast_test <- BreastCancer[-trainsmp,][,1:10] #Creating test subset of data
+```
+
+```{r}
+set.seed(1127)
+
+logistic_regression <- glm(Class ~., data = Breast_train, family = binomial) #Creating binomial logistic regression model predicting class on the rest of the dataset variables
+summary(logistic_regression) #Summary of model
+```
+
+```{r}
+set.seed(1127)
+
+logistic_regression <- glm(Class ~ Cl.thickness + Cell.shape + Bare.nuclei, data = Breast_train, family = binomial) #Adjusted model based on significant predictors
+summary(logistic_regression) #Sumarry of model
+```
+
+For this dataset, I used a binomial logistic regression model to predict the cancer class. This was because the predicted variable (cancer class) is binary, meaning there would only be two outcomes based on a set of predictors. Initially I trained the model on all the predictors in the dataset but then found that only 3 were significant in their effects on the training model (Cl.thickness, Cell.Shape, and Bare.nuclei), so I retrained a model based on those predcitors. The second summary shows that the residuals improved a little as well.
+
+```{r}
+set.seed(1127)
+
+Class_pred <- predict(logistic_regression, newdata = Breast_test, type = "response") #Predicting Class using the model on the test dataset. Type = 'response' creates predictions based on probability of prediction being 'T' or 'F' 
+numpred <- ifelse(Class_pred > 0.5, "malignant", "benign") #Saving values of predictions based on over or under .5 (50%) probability
+Class_pred <- factor(numpred, levels = c("benign", "malignant")) #Saving variable as a factor with 'benign' or 'malignant' levels.
+
+confusionMatrix(Class_pred, Breast_test$Class) #Confusion matrix showing a 97% accuracy rate of training model
+```
+
+```{r}
+pr <- prediction(as.numeric(Class_pred), Breast_test$Class)
+perf <- performance(pr, "tpr", "fpr")
+plot(perf) #Steps used to create an ROC curve of our data with False Positive rate vs. True Positive Rate on the axis. 
+```
+
